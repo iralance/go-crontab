@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"github.com/iralance/go-crontab/common"
 	"go.etcd.io/etcd/api/v3/mvccpb"
@@ -153,91 +152,6 @@ func (jobMgr *JobMgr) watchKiller() {
 			}
 		}
 	}()
-}
-
-func (jobMgr *JobMgr) DeleteJob(name string) (oldJob *common.Job, err error) {
-	//把任务保存在/cron/jobs/任务名 -> json
-	var (
-		jobKey     string
-		deleteResp *clientv3.DeleteResponse
-		oldJobObj  common.Job
-	)
-	jobKey = common.JOB_SAVE_DIR + name
-
-	// 保存到etcd
-	if deleteResp, err = jobMgr.kv.Delete(context.TODO(), jobKey, clientv3.WithPrevKV()); err != nil {
-		return
-	}
-	// 如果是更新, 那么返回旧值
-	if len(deleteResp.PrevKvs) > 0 {
-		// 对旧值做一个反序列化
-		if err = json.Unmarshal(deleteResp.PrevKvs[0].Value, &oldJobObj); err != nil {
-			err = nil
-			return
-		}
-		oldJob = &oldJobObj
-	}
-	return
-
-}
-
-func (jobMgr *JobMgr) ListJobs() (jobList []*common.Job, err error) {
-	//把任务保存在/cron/jobs/任务名 -> json
-	var (
-		dirKey  string
-		getResp *clientv3.GetResponse
-		kv      *mvccpb.KeyValue
-		job     *common.Job
-	)
-	dirKey = common.JOB_SAVE_DIR
-
-	// 保存到etcd
-	if getResp, err = jobMgr.kv.Get(context.TODO(), dirKey, clientv3.WithPrefix()); err != nil {
-		return
-	}
-
-	jobList = make([]*common.Job, 0)
-	// 如果是更新, 那么返回旧值
-	if len(getResp.Kvs) > 0 {
-		// 对旧值做一个反序列化
-		for _, kv = range getResp.Kvs {
-			job = &common.Job{}
-			if err = json.Unmarshal(kv.Value, job); err != nil {
-				continue
-			}
-			fmt.Println(job)
-			jobList = append(jobList, job)
-		}
-
-	}
-	return
-
-}
-
-func (jobMgr *JobMgr) KillJob(name string) (err error) {
-	// 更新一下key=/cron/killer/任务名
-
-	var (
-		killerKey      string
-		leaseId        clientv3.LeaseID
-		leaseGrantResp *clientv3.LeaseGrantResponse
-	)
-	killerKey = common.JOB_KILLER_DIR + name
-
-	// 让worker监听到一次put操作, 创建一个租约让其稍后自动过期即可
-	if leaseGrantResp, err = jobMgr.lease.Grant(context.TODO(), 1); err != nil {
-		return
-	}
-
-	// 租约ID
-	leaseId = leaseGrantResp.ID
-
-	// 设置killer标记
-	if _, err = jobMgr.kv.Put(context.TODO(), killerKey, "", clientv3.WithLease(leaseId)); err != nil {
-		return
-	}
-	return
-
 }
 
 // 创建任务执行锁
